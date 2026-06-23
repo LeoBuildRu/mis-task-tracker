@@ -1,0 +1,399 @@
+---
+openapi: 3.0.3
+info:
+  title: MIS Task Tracker API
+  version: v1
+  description: |
+    API трекера рабочих задач для МИС.
+
+    Поддерживает:
+      * CRUD задач (одноразовых и периодических)
+      * Управление тегами (с тремя обязательными системными)
+      * Развёртывание периодических задач в окно дат без материализации
+      * Состояние и переопределения для конкретных экземпляров серии
+
+servers:
+  - url: http://localhost:3000
+    description: Local dev
+
+tags:
+  - name: Tasks
+    description: Задачи (серии и одноразовые)
+  - name: Tags
+    description: Теги задач
+  - name: Task occurrences
+    description: Конкретные экземпляры периодической задачи
+
+paths:
+  /api/v1/tasks:
+    get:
+      tags: [Tasks]
+      summary: Список задач в окне дат
+      description: |
+        Возвращает массив `items`, где каждый элемент — либо одноразовая задача,
+        либо конкретное появление (occurrence) периодической задачи на дату.
+        Виртуальные оккуренсы не материализуются в БД.
+      parameters:
+        - { name: from,     in: query, schema: { type: string, format: date }, description: "ISO date; default — сегодня" }
+        - { name: to,       in: query, schema: { type: string, format: date }, description: "ISO date; default — сегодня + 30 дней; макс окно — 366 дней" }
+        - { name: status,   in: query, schema: { $ref: "#/components/schemas/TaskStatus" } }
+        - { name: tag_ids,  in: query, style: form, explode: true, schema: { type: array, items: { type: integer } } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  from:  { type: string, format: date }
+                  to:    { type: string, format: date }
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/TaskItem" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+    post:
+      tags: [Tasks]
+      summary: Создать задачу (одноразовую или периодическую)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [task]
+              properties:
+                task: { $ref: "#/components/schemas/TaskInput" }
+      responses:
+        "201":
+          description: Создано
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+
+  /api/v1/tasks/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [Tasks]
+      summary: Получить задачу по ID
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    patch:
+      tags: [Tasks]
+      summary: Обновить задачу
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                task: { $ref: "#/components/schemas/TaskInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+    delete:
+      tags: [Tasks]
+      summary: Удалить задачу
+      responses:
+        "204": { description: No content }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/tasks/{task_id}/tags:
+    parameters:
+      - { name: task_id, in: path, required: true, schema: { type: integer } }
+    post:
+      tags: [Tasks]
+      summary: Добавить тег задаче
+      description: Передайте либо `tag_id` (существующий тег), либо `name` (создаст новый, если такого нет).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tag_id: { type: integer }
+                name:   { type: string }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/tasks/{task_id}/tags/{id}:
+    parameters:
+      - { name: task_id, in: path, required: true, schema: { type: integer } }
+      - { name: id,      in: path, required: true, schema: { type: integer } }
+    delete:
+      tags: [Tasks]
+      summary: Снять тег с задачи
+      responses:
+        "204": { description: No content }
+
+  /api/v1/tags:
+    get:
+      tags: [Tags]
+      summary: Список всех тегов
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Tag" }
+    post:
+      tags: [Tags]
+      summary: Создать тег
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tag]
+              properties:
+                tag:
+                  type: object
+                  required: [name]
+                  properties:
+                    name: { type: string }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Tag" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+
+  /api/v1/tags/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+    patch:
+      tags: [Tags]
+      summary: Переименовать тег
+      description: Системные теги защищены — попытка вернёт 403.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tag:
+                  type: object
+                  properties:
+                    name: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Tag" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+
+    delete:
+      tags: [Tags]
+      summary: Удалить тег
+      description: Системные теги нельзя удалить — 403.
+      responses:
+        "204": { description: No content }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/tasks/{task_id}/occurrences/{date}:
+    parameters:
+      - { name: task_id, in: path, required: true, schema: { type: integer } }
+      - { name: date,    in: path, required: true, schema: { type: string, format: date } }
+    get:
+      tags: [Task occurrences]
+      summary: Состояние конкретного экземпляра серии
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskOccurrence" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+    patch:
+      tags: [Task occurrences]
+      summary: Переопределить конкретный экземпляр
+      description: Можно изменить статус, время, name/description для одного дня без затрагивания серии.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                occurrence:
+                  type: object
+                  properties:
+                    status:       { $ref: "#/components/schemas/TaskStatus" }
+                    scheduled_at: { type: string, format: date-time }
+                    name:         { type: string }
+                    description:  { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskOccurrence" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+    delete:
+      tags: [Task occurrences]
+      summary: Отменить один экземпляр серии
+      responses:
+        "200":
+          description: Cancelled occurrence
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskOccurrence" }
+
+components:
+  schemas:
+    TaskStatus:
+      type: string
+      enum: [pending, in_progress, completed, cancelled]
+
+    Frequency:
+      type: string
+      enum: [daily, monthly, specific_dates, even_days, odd_days]
+
+    Tag:
+      type: object
+      properties:
+        id:     { type: integer }
+        name:   { type: string }
+        system: { type: boolean }
+
+    RecurrenceRule:
+      type: object
+      properties:
+        id:             { type: integer }
+        frequency:      { $ref: "#/components/schemas/Frequency" }
+        interval:       { type: integer, minimum: 1, description: "Используется для daily" }
+        days_of_month:  { type: array, items: { type: integer, minimum: 1, maximum: 31 }, description: "Используется для monthly" }
+        specific_dates: { type: array, items: { type: string, format: date }, description: "Используется для specific_dates" }
+        starts_on:      { type: string, format: date }
+        ends_on:        { type: string, format: date, nullable: true }
+
+    RecurrenceRuleInput:
+      type: object
+      properties:
+        frequency:      { $ref: "#/components/schemas/Frequency" }
+        interval:       { type: integer }
+        days_of_month:  { type: array, items: { type: integer } }
+        specific_dates: { type: array, items: { type: string, format: date } }
+        starts_on:      { type: string, format: date }
+        ends_on:        { type: string, format: date }
+        _destroy:       { type: boolean, description: "true для отвязки правила" }
+
+    TaskInput:
+      type: object
+      properties:
+        name:                        { type: string }
+        description:                 { type: string }
+        scheduled_at:                { type: string, format: date-time }
+        status:                      { $ref: "#/components/schemas/TaskStatus" }
+        tag_ids:                     { type: array, items: { type: integer } }
+        recurrence_rule_attributes:  { $ref: "#/components/schemas/RecurrenceRuleInput" }
+
+    Task:
+      type: object
+      properties:
+        id:              { type: integer }
+        name:            { type: string }
+        description:     { type: string, nullable: true }
+        scheduled_at:    { type: string, format: date-time }
+        status:          { $ref: "#/components/schemas/TaskStatus" }
+        recurring:       { type: boolean }
+        recurrence_rule: { $ref: "#/components/schemas/RecurrenceRule", nullable: true }
+        tags:
+          type: array
+          items: { $ref: "#/components/schemas/Tag" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    TaskItem:
+      type: object
+      description: |
+        Унифицированное представление одной видимой задачи в окне.
+        Для одноразовой задачи `occurrence_date` = null.
+        Для развёрнутой периодической — указана дата конкретного появления.
+      properties:
+        task_id:         { type: integer }
+        occurrence_id:   { type: integer, nullable: true }
+        occurrence_date: { type: string, format: date, nullable: true }
+        name:            { type: string }
+        description:     { type: string, nullable: true }
+        scheduled_at:    { type: string, format: date-time }
+        status:          { $ref: "#/components/schemas/TaskStatus" }
+        recurring:       { type: boolean }
+        override:        { type: boolean, description: "true если у дня есть переопределение" }
+        tags:
+          type: array
+          items: { $ref: "#/components/schemas/Tag" }
+
+    TaskOccurrence:
+      allOf:
+        - $ref: "#/components/schemas/TaskItem"
+        - type: object
+          properties:
+            cancelled: { type: boolean }
+
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+
+    Errors:
+      type: object
+      properties:
+        errors:
+          type: array
+          items: { type: string }
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Errors" }
+    Unprocessable:
+      description: Validation error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Errors" }
