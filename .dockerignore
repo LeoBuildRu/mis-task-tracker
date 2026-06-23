@@ -1,0 +1,14 @@
+.git
+.gitignore
+.dockerignore
+.bundle
+log/*
+tmp/*
+storage/*
+coverage/
+.env
+.env.*
+!.env.example
+README.md
+HISTORY.md
+spec/

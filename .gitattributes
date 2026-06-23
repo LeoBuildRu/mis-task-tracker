@@ -1,0 +1,13 @@
+* text=auto eol=lf
+
+*.rb       text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.md       text eol=lf
+*.json     text eol=lf
+*.ru       text eol=lf
+
+bin/*      text eol=lf
+Gemfile    text eol=lf
+Rakefile   text eol=lf
+Dockerfile text eol=lf

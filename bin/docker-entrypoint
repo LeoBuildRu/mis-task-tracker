@@ -1,0 +1,17 @@
+#!/bin/bash -e
+
+# Wait briefly for Postgres to accept connections
+if [ -n "${POSTGRES_HOST:-}" ]; then
+  retries=30
+  until pg_isready -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-postgres}" >/dev/null 2>&1 || [ $retries -eq 0 ]; do
+    echo "Waiting for Postgres at $POSTGRES_HOST:${POSTGRES_PORT:-5432}... ($retries)"
+    retries=$((retries - 1))
+    sleep 1
+  done
+fi
+
+if [ "${1:-}" = "./bin/rails" ] || [ "${1:-}" = "rails" ] || [ "${1:-}" = "bundle" ]; then
+  bundle exec rails db:prepare
+fi
+
+exec "$@"

@@ -1,0 +1,4 @@
+#!/usr/bin/env ruby
+load File.expand_path("../bin/bundle", __dir__) if File.exist?(File.expand_path("../bin/bundle", __dir__))
+require "rubygems"
+load Gem.activate_bin_path("bundler", "bundle")
